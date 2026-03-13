@@ -3,34 +3,33 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sathi Guide - Final Version</title>
+    <title>Sathi Guide Final</title>
     <style>
         body { margin: 0; background: #000; color: #fff; font-family: sans-serif; text-align: center; }
         .container { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 15px; }
         #speakerToggle { width: 90px; height: 90px; border-radius: 50%; border: 4px solid #fff; background: #007bff; color: white; font-size: 3rem; position: fixed; top: 15px; right: 15px; z-index: 1000; }
-        #speakerToggle.muted { background: #555; }
-        #destInput { width: 90%; height: 60px; font-size: 1.5rem; border-radius: 12px; margin: 20px 0; text-align: center; }
+        #destInput { width: 90%; height: 60px; font-size: 1.5rem; border-radius: 12px; margin: 20px 0; text-align: center; color: #000; }
         button { width: 100%; min-height: 85px; font-size: 2rem; font-weight: bold; border-radius: 20px; margin: 10px 0; border: none; cursor: pointer; }
         #setDestBtn { background: #ffc107; color: #000; }
         #startBtn { background: #28a745; color: white; display: none; height: 160px; font-size: 3rem; }
         #statusBtn { background: #007bff; color: white; display: none; height: 110px; }
         #resetBtn { background: #dc3545; color: white; height: 75px; font-size: 1.5rem; }
         #liveDistanceDisplay { display: none; margin: 30px 0; }
-        #kmValue { font-size: 9rem; color: #00ff00; font-weight: bold; }
+        #kmValue { font-size: 9rem; color: #00ff00; font-weight: bold; outline: none; }
         .location-item { background: #222; padding: 20px; margin: 10px 0; border-radius: 15px; border-left: 10px solid #ffc107; text-align: left; }
     </style>
 </head>
 <body>
 <div class="container">
-    <button id="speakerToggle" onclick="toggleSpeaker()" aria-label="आवाज चालू है, बंद करने के लिए डबल टैप करें">🔊</button>
+    <button id="speakerToggle" onclick="toggleSpeaker()">🔊</button>
     <div id="searchArea">
         <h1 style="color: #007bff;">साथी गाइड</h1>
-        <input type="text" id="destInput" placeholder="मंजिल का नाम लिखें..." aria-label="मंजिल का नाम लिखें">
+        <input type="text" id="destInput" placeholder="मंजिल का नाम लिखें...">
         <button id="setDestBtn" onclick="findLocations()">लोकेशन खोजें</button>
         <div id="locationList"></div>
     </div>
     <div id="liveDistanceDisplay">
-        <div id="kmValue" aria-live="assertive">--</div>
+        <div id="kmValue" aria-live="off" tabindex="0">--</div>
         <div style="font-size: 2rem;">किलोमीटर बाकी</div>
     </div>
     <button id="startBtn" onclick="initiateJourney()">यात्रा शुरू करें</button>
@@ -40,6 +39,7 @@
 
 <script>
     let destinationCoords = null, lastSpokenKm = null, currentLat = 0, currentLon = 0, watchID = null, isMuted = false;
+    let autoUpdateInterval = null;
 
     function speak(text) {
         if (isMuted) return;
@@ -51,15 +51,8 @@
 
     function toggleSpeaker() {
         isMuted = !isMuted;
-        let btn = document.getElementById('speakerToggle');
-        if (isMuted) {
-            btn.innerText = "🔇"; btn.classList.add('muted');
-            btn.setAttribute('aria-label', "आवाज बंद है, चालू करने के लिए डबल टैप करें");
-        } else {
-            btn.innerText = "🔊"; btn.classList.remove('muted');
-            btn.setAttribute('aria-label', "आवाज चालू है, बंद करने के लिए डबल टैप करें");
-            speak("आवाज चालू");
-        }
+        document.getElementById('speakerToggle').innerText = isMuted ? "🔇" : "🔊";
+        if (!isMuted) speak("आवाज चालू");
     }
 
     async function findLocations() {
@@ -98,34 +91,76 @@
 
     function initiateJourney() {
         navigator.geolocation.getCurrentPosition((pos) => {
-            let d = calculateDistance(pos.coords.latitude, pos.coords.longitude, destinationCoords.lat, destinationCoords.lon);
+            currentLat = pos.coords.latitude; currentLon = pos.coords.longitude;
+            let d = calculateDistance(currentLat, currentLon, destinationCoords.lat, destinationCoords.lon);
             lastSpokenKm = Math.floor(d);
-            document.getElementById('kmValue').innerText = d.toFixed(1);
+            updateDistanceDisplay(d);
             document.getElementById('liveDistanceDisplay').style.display = "block";
             document.getElementById('startBtn').style.display = "none";
             document.getElementById('statusBtn').style.display = "block";
-            speak("यात्रा शुरू, मंजिल " + d.toFixed(1) + " किलोमीटर दूर है");
+            speak("यात्रा शुरू। मंजिल " + d.toFixed(1) + " किलोमीटर दूर है। हर 5 मिनट में अपडेट मिलेगा।");
+            
+            if(autoUpdateInterval) clearInterval(autoUpdateInterval);
+            autoUpdateInterval = setInterval(whereAmI, 300000); 
+            
             startTracking();
         }, () => speak("जीपीएस ऑन करें"), { enableHighAccuracy: true });
+    }
+
+    function updateDistanceDisplay(dist) {
+        let kmVal = document.getElementById('kmValue');
+        let dStr = dist.toFixed(1);
+        kmVal.innerText = dStr;
+        kmVal.setAttribute('aria-label', dStr + " किलोमीटर बाकी");
     }
 
     function startTracking() {
         watchID = navigator.geolocation.watchPosition((pos) => {
             currentLat = pos.coords.latitude; currentLon = pos.coords.longitude;
             let dist = calculateDistance(currentLat, currentLon, destinationCoords.lat, destinationCoords.lon);
-            if(dist > 2000) return; // 8383 एरर से सुरक्षा
-            document.getElementById('kmValue').innerText = dist.toFixed(1);
+            updateDistanceDisplay(dist);
             let currentKmFloor = Math.floor(dist);
             if (lastSpokenKm !== null && currentKmFloor < lastSpokenKm) {
                 speak("मंजिल " + currentKmFloor + " किलोमीटर दूर है");
                 lastSpokenKm = currentKmFloor;
             }
-            if (dist < 0.4) speak("सावधान, आपका स्टैंड आ गया है");
+            if (dist < 0.4) {
+                speak("सावधान, आपकी मंजिल पास है");
+                if(autoUpdateInterval) clearInterval(autoUpdateInterval);
+            }
         }, null, { enableHighAccuracy: true });
     }
 
-    function resetApp() { location.reload(); }
-    function whereAmI() { speak("मंजिल " + document.getElementById('kmValue').innerText + " किलोमीटर दूर है"); }
+    async function whereAmI() {
+        if(currentLat === 0) return;
+        let address = "पता नहीं चल पाया";
+        try {
+            let res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${currentLat}&lon=${currentLon}`);
+            let data = await res.json();
+            address = data.display_name.split(',').slice(0,2).join(', ');
+        } catch(e) {}
+
+        let nearby = "";
+        try {
+            let query = `[out:json];(node["amenity"~"bank|atm|hospital"](around:100,${currentLat},${currentLon});node["highway"="bus_stop"](around:100,${currentLat},${currentLon});node["amenity"="bus_station"](around:100,${currentLat},${currentLon}););out body 3;`;
+            let resNearby = await fetch("https://overpass-api.de/api/interpreter?data=" + encodeURIComponent(query));
+            let dataNearby = await resNearby.json();
+            if(dataNearby.elements.length > 0) {
+                let places = dataNearby.elements.map(e => e.tags.name || "अज्ञात स्थान").join(", ");
+                nearby = " पास में " + places + " है।";
+            } else {
+                nearby = " पास में कोई बस स्टैंड या बैंक नहीं है।";
+            }
+        } catch(e) {}
+
+        let dist = document.getElementById('kmValue').innerText;
+        speak(`अपडेट: आप अभी ${address} के पास हैं। मंजिल ${dist} किलोमीटर दूर है। ${nearby}`);
+    }
+
+    function resetApp() { 
+        if(autoUpdateInterval) clearInterval(autoUpdateInterval);
+        location.reload(); 
+    }
     window.onload = () => speak("नमस्ते सुभाष शर्मा जी, साथी गाइड तैयार है");
 </script>
 </body>
